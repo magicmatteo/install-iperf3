@@ -1,15 +1,32 @@
-$proxy = netsh winhttp show proxy
-if (($proxy) | ForEach-Object {$_.Contains("Direct access")}){
-    $proxy | Add-Member -Name uri -MemberType NoteProperty -Value "Direct"
-    Write-Output "This script uses an HTTPS request to download iperf"
-    Write-Output "Current Proxy Settings are DIRECT - If at school, please set proxy"
-    Write-Output $proxy
-    $userinput = Read-Host -Prompt "Press 'Y' to automatically set http proxy for Catholic VIC schools"
-    if ($userinput.ToString().ToUpper() -eq 'Y'){
+param($ConfigProxy, $Silent)
+
+if ($silent -eq "true"){
+    if (!($configproxy)){
+        Write-Warning "Silent deployment requires setting of configproxy argument"
+        Write-Output "Use install-iperf3.ps1 -ConfigProxy <true/false> -Silent true"
+        Write-Output "Exiting..."
+        Exit
+    }
+    elseif ($ConfigProxy -eq "true") {
         & netsh --% winhttp set proxy cloudproxy.cecv.catholic.edu.au:9403 <local>
     }
 }
 
+
+if (!($configproxy)) {
+
+    $proxy = netsh winhttp show proxy
+    if (($proxy) | ForEach-Object {$_.Contains("Direct access")}){
+        $proxy | Add-Member -Name uri -MemberType NoteProperty -Value "Direct"
+        Write-Output "This script uses an HTTPS request to download iperf"
+        Write-Output "Current Proxy Settings are DIRECT - If at school, please set proxy"
+        Write-Output $proxy
+        $userinput = Read-Host -Prompt "Press 'Y' to automatically set http proxy for Catholic VIC schools"
+        if ($userinput.ToString().ToUpper() -eq 'Y'){
+            & netsh --% winhttp set proxy cloudproxy.cecv.catholic.edu.au:9403 <local>
+        }
+    }
+}
 
 
 $url = "https://iperf.fr/download/windows/iperf-3.1.3-win64.zip"
