@@ -30,6 +30,7 @@ if (test-Path($exeLocation)){
     Get-Process -Name *iperf* | Stop-Process
     Remove-Item $installLocation -Recurse | Out-Null
     Get-NetFirewallPortFilter | Where-Object {$_.LocalPort -eq 5201 -and $_.InstanceID -ne $null} | Get-NetFirewallRule | Remove-NetFirewallRule
+    Unregister-ScheduledTask -TaskName "iperf3Server" -ErrorAction SilentlyContinue
     Write-Output "Finished cleaning up"
 }
 
@@ -110,32 +111,31 @@ if (!(Get-NetFirewallPortFilter | Where-Object {$_.LocalPort -eq 5201 -and $_.In
     }
 }
 
-# :: Install iperf3 as Windows service
+# :: Create scheduled task for iperf3
 
 $iperflog = "$installLocation\iperf3-server-logs.txt"
 $iperfoptions = "--server --daemon --port 5201 --version4 --format Mbits --verbose --logfile $iperflog"
 
-$params = @{
+$trigger = New-ScheduledTaskTrigger -Daily -At 01:00
+$actions = @(
+    New-ScheduledTaskAction -Execute "TaskKill.exe" -Argument "/IM iperf3.exe /F"
+    New-ScheduledTaskAction -Execute "iperf3.exe" -Argument $iperfoptions -WorkingDirectory $installLocation
+)
+$description = "iperf3 server task"
 
-    Name = iperf3
-    BinaryPathName = $exeLocation
-    StartupType = "Automatic"
-    DisplayName = "iPerf3 Service"
-    Description = "iPerf3 Service for testing network speed"
-}
+$task = New-ScheduledTask -Action $actions -Trigger $trigger -Description $description
 
 try {
-    New-Service @params
-    Set-ItemProperty -Path "HKLM:SYSTEM\CurrentControlSet\services\iperf3\Parameters" -Name "AppParameters" -Value $iperfoptions
-    Set-ItemProperty -Path "HKLM:SYSTEM\CurrentControlSet\services\iperf3\Parameters" -Name "Application" -Value "$exeLocation /f" 
+    Register-ScheduledTask -TaskName "iperf3Server" -InputObject $task
 }
 catch {
-    Write-Warning "An error occured while creating iperf3 service" | Out-File $logloc -Append
+    Write-Warning "An error occurred while trying to create the iperf scheduled task" | Out-File $logloc -Append
     Write-Warning $_ | Out-File $logloc -Append
 }
 
 Write-Output 'Please note - only Windows Firewall rules created'
 Write-Output "If 3rd party firewall installed - please create manual rule Port 5201 TCP inbound/outbound"
+Start-ScheduledTask -TaskName "iperf3Server"
 Write-Output "iperf3 Process now running:"
 Write-Output "|---------------------------|"
-Get-service iperf3
+Get-Process iperf3
