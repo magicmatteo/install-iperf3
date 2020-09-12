@@ -14,10 +14,12 @@ if (($proxy) | ForEach-Object {$_.Contains("Direct access")}){
 
 $url = "https://iperf.fr/download/windows/iperf-3.1.3-win64.zip"
 $output = "$env:TEMP\iperf-3.1.3-win64.zip"
+$sha256 = "3C3DB693C1BDCC902CA9198FC716339373658233B3392FFE3D467F7695762CD1"
 $installLocation = "$env:SystemDrive\iperf3"
 $exeLocation = "$env:SystemDrive\iperf3\iperf3.exe"
 $logloc = "$env:TEMP\iperf3-log.txt"
 
+## Check for install block ##
 if (test-Path($exeLocation)){
     $userinput = Read-Host -Prompt "$exeLocation already exists - please enter Y for full reinstallation"
     if (!($userinput.ToString().ToUpper() -eq 'Y')){
@@ -35,7 +37,7 @@ if (!(Test-Path($logloc))){
     New-Item -Path $env:TEMP -Name "iperf3-log.txt" -ItemType File | Out-Null
 }
 
-
+## Download file block ##
 try {
     Invoke-WebRequest -Uri $url -OutFile $output
 }
@@ -45,7 +47,27 @@ catch {
     exit
 }
 
+## Hash checking block ##
+try {
+    Write-Output "Calculating SHA256 hash of $output" | Out-File $logloc -Append
+    Write-Output "Calculating SHA256 hash of $output"
+    $hash = Get-FileHash -Path $output -Algorithm SHA256
+    if (!($hash.hash -ne $sha256)){
+        Write-Output "SUCCESS: Hash check passed" | Out-File $logloc -Append
+        Write-Host "SUCCESS: Hash check passed" -ForegroundColor Green
+    }
+    else {
+        Throw "Critical error! HASH CHECK FAILED"
+    }
+}
+catch {
+        Write-Warning $_ | Out-File $logloc -Append
+        Write-Warning "Expected SHA256 = $sha256" | Out-File $logloc -Append
+        Write-Warning "SHA256 produced = $($hash.hash)" | Out-File $logloc -Append
+        exit
+}
 
+## Extract and move block ##
 if (Test-Path($output)) {
     Write-Output "$output exists - Unzipping" | Out-File $logloc -Append
     
@@ -67,6 +89,7 @@ if (Test-Path($output)) {
     
 }
 
+## Create firewall rules block ##
 if (!(Get-NetFirewallPortFilter | Where-Object {$_.LocalPort -eq 5201 -and $_.InstanceID -ne $null})){
     try {
         New-NetFirewallRule -DisplayName "IPERF3 TCP 5201"  -Direction Inbound `
@@ -87,37 +110,32 @@ if (!(Get-NetFirewallPortFilter | Where-Object {$_.LocalPort -eq 5201 -and $_.In
     }
 }
 
-Write-Output "Script completed successfully"
+# :: Install iperf3 as Windows service
 
-& c:\iperf3\iperf3.exe --% --server --daemon --format Mbits
+$iperflog = "$installLocation\iperf3-server-logs.txt"
+$iperfoptions = "--server --daemon --port 5201 --version4 --format Mbits --verbose --logfile $iperflog"
+
+$params = @{
+
+    Name = iperf3
+    BinaryPathName = $exeLocation
+    StartupType = "Automatic"
+    DisplayName = "iPerf3 Service"
+    Description = "iPerf3 Service for testing network speed"
+}
+
+try {
+    New-Service @params
+    Set-ItemProperty -Path "HKLM:SYSTEM\CurrentControlSet\services\iperf3\Parameters" -Name "AppParameters" -Value $iperfoptions
+    Set-ItemProperty -Path "HKLM:SYSTEM\CurrentControlSet\services\iperf3\Parameters" -Name "Application" -Value "$exeLocation /f" 
+}
+catch {
+    Write-Warning "An error occured while creating iperf3 service" | Out-File $logloc -Append
+    Write-Warning $_ | Out-File $logloc -Append
+}
 
 Write-Output 'Please note - only Windows Firewall rules created'
 Write-Output "If 3rd party firewall installed - please create manual rule Port 5201 TCP inbound/outbound"
 Write-Output "iperf3 Process now running:"
 Write-Output "|---------------------------|"
-Get-Process iperf3
-
-
-# REwrite this in powershell
-# ::
-# :: Install iperf3 as Windows service
-# ::
-# SET iperfdir=C:\iperf3
-# SET iperfprog=iperf3.exe
-# SET iperflog=iperf3-server-logs.txt
-# SET servicename=iperf3
-# SET start=auto
-# SET binpath=%iperfdir%\srvany.exe
-# SET iperfoptions=--server --daemon --port 5201 --version4 --format [m] --verbose --logfile %iperfdir%\%iperflog%
-# SET displayname=iPerf3 Service
-# SET description=iPerf3 Service provide a possibility to test network speed
-# ::
-# ::
-# sc.exe create %servicename% displayname= "%displayname%" start= %start% binpath= "%binpath%"
-# sc description %servicename% "%description%"
-# ::
-# reg add HKLM\SYSTEM\CurrentControlSet\services\%servicename%\Parameters /v AppParameters /t REG_SZ /d "%iperfoptions%"
-# reg add HKLM\SYSTEM\CurrentControlSet\services\%servicename%\Parameters /v Application /t REG_SZ /d "%iperfdir%\%iperfprog%" /f
-# ::
-# pause
-# ::
+Get-service iperf3
